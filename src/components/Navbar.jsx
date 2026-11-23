@@ -303,7 +303,7 @@ export default function Navbar() {
             <span className="nav-link-text">{t('home')}</span>
           </NavLink>
           <NavLink to="/shop" className="nav-link">
-            <span className="nav-link-text">{t('shopAll')}</span>
+            <span className="nav-link-text">{t('Explore All')}</span>
           </NavLink>
           <NavLink to="/about" className="nav-link">
             <span className="nav-link-text">{t('aboutUs')}</span>
@@ -474,7 +474,7 @@ export default function Navbar() {
             <BrandLogoVideo variant="mobile-nav" />
             <div className="brand-text-logo">
               <div className="brand-text-line1">Dharani</div>
-              <div className="brand-text-line2">Herbbals<span className="brand-reg">®</span></div>
+              <div className="brand-text-line2">Herbals<span className="brand-reg">®</span></div>
             </div>
           </div>
           <button className="close-drawer-btn" onClick={toggleMobileMenu}>
@@ -488,7 +488,7 @@ export default function Navbar() {
           </NavLink>
           <NavLink to="/shop" className="mobile-nav-link" onClick={toggleMobileMenu}>
             <div className="nav-icon-box"><ShoppingBag size={22} /></div>
-            <span>{t('shopAll')}</span>
+            <span>{t('Explore All')}</span>
           </NavLink>
           <NavLink to="/about" className="mobile-nav-link" onClick={toggleMobileMenu}>
             <div className="nav-icon-box"><Info size={22} /></div>

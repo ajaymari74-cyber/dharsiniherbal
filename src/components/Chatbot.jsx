@@ -19,7 +19,7 @@ const PREDEFINED_RESPONSES = [
   },
   {
     keywords: ['about dharani', 'about us', 'who are you', 'what is dharani', 'about company'],
-    response: "Dharani Herbbals provides pure, chemical-free herbal remedies for health and beauty. We bring ancient Siddha and Ayurvedic wisdom into modern daily care."
+    response: "Dharani Herbals provides pure, chemical-free herbal remedies for health and beauty. We bring ancient Siddha and traditional herbal wisdom into modern daily care."
   },
   {
     keywords: ['mission', 'goal', 'vision'],
@@ -39,7 +39,7 @@ const PREDEFINED_RESPONSES = [
   },
   {
     keywords: ['contact', 'support', 'help', 'whatsapp', 'number', 'call', 'reach', 'email'],
-    response: "You can reach us via email at info@dharaniherbbals.in or Call/WhatsApp us at +91 97881 22001 / +91 99655 32001."
+    response: "You can reach us via email at info@dharaniherbbals.in or Call/WhatsApp us at +91 97881 22001 | +91 99655 32001."
   },
   {
     keywords: ['organic', 'natural', 'pure', 'chemical', 'ingredients', 'safe'],
