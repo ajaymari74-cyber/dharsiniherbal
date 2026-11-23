@@ -1,4 +1,4 @@
-import { createContext, useState, useContext, useEffect, useMemo } from 'react';
+import { createContext, useState, useContext, useEffect, useMemo, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { useProducts } from './ProductsContext';
 import { useAuthModal } from './AuthModalContext';
@@ -10,8 +10,20 @@ import { COMPANY_FACTS } from '../data/companyFacts';
 
 const CartContext = createContext();
 
+const GUEST_CART_KEY = 'dharani_cart';
+const OFFLINE_BACKUP_KEY = 'dharani_cart_offline_backup';
 const BUNDLE_CART_KEY = 'dharani_bundle_cart_items';
-let isSyncingGuestCart = false;
+
+const clearAllCartCaches = () => {
+  try {
+    localStorage.removeItem(GUEST_CART_KEY);
+    localStorage.removeItem(OFFLINE_BACKUP_KEY);
+    localStorage.removeItem(BUNDLE_CART_KEY);
+    sessionStorage.removeItem(GUEST_CART_KEY);
+    sessionStorage.removeItem(OFFLINE_BACKUP_KEY);
+    sessionStorage.removeItem(BUNDLE_CART_KEY);
+  } catch (e) {}
+};
 
 const getStoredBundleCartItems = () => {
   try {
@@ -43,10 +55,10 @@ export function CartProvider({ children }) {
       let initial = [];
       const stored = localStorage.getItem('user');
       if (stored) {
-        const offline = localStorage.getItem('dharani_cart_offline_backup');
+        const offline = localStorage.getItem(OFFLINE_BACKUP_KEY);
         if (offline) initial = JSON.parse(offline);
       } else {
-        const saved = localStorage.getItem('dharani_cart');
+        const saved = localStorage.getItem(GUEST_CART_KEY);
         if (saved) initial = JSON.parse(saved);
       }
       const storedBundles = getStoredBundleCartItems();
@@ -113,6 +125,7 @@ export function CartProvider({ children }) {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const { products } = useProducts();
   const { openLoginModal } = useAuthModal();
+  const activeUserIdRef = useRef(null);
 
   const getUser = () => {
     try {
@@ -142,45 +155,18 @@ export function CartProvider({ children }) {
     const user = getUser();
 
     if (user) {
-      // 1. Safely sync guest cart ONCE using a lock so it never duplicates or leaks
-      if (!isSyncingGuestCart) {
-        const savedGuestCart = localStorage.getItem('dharani_cart');
-        if (savedGuestCart) {
-          isSyncingGuestCart = true;
-          localStorage.removeItem('dharani_cart');
-          try {
-            const guestItems = JSON.parse(savedGuestCart);
-            if (Array.isArray(guestItems) && guestItems.length > 0) {
-              for (const item of guestItems) {
-                if (!item || item.isBundle) continue;
-                try {
-                  await fetch(`${API_BASE_URL}/carts/`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'ngrok-skip-browser-warning': 'true'
-                    },
-                    body: JSON.stringify({
-                      user_id: user.id,
-                      product_id: item.id,
-                      quantity: item.quantity,
-                      ...(item.variation_id && { variation_id: item.variation_id })
-                    })
-                  });
-                } catch (e) {
-                  console.error("Failed to sync guest cart item to server:", e);
-                }
-              }
-            }
-          } catch (e) {
-            console.error("Error syncing guest cart:", e);
-          } finally {
-            isSyncingGuestCart = false;
-          }
-        }
-      }
+      // Strictly isolate logged-in account: discard any guest browser storage without syncing to account
+      try {
+        localStorage.removeItem(GUEST_CART_KEY);
+      } catch (e) {}
 
-      // 2. Fetch ONLY this logged-in user's cart from backend
+      // If switched to a different user ID, clear stale backup/bundle cache from previous account
+      if (activeUserIdRef.current && String(activeUserIdRef.current) !== String(user.id)) {
+        clearAllCartCaches();
+        setCartItems([]);
+      }
+      activeUserIdRef.current = user.id;
+
       let url = `${API_BASE_URL}/carts/?user_id=${user.id}`;
       if (params.address_id) {
         url += `&address_id=${params.address_id}`;
@@ -217,6 +203,8 @@ export function CartProvider({ children }) {
         if (!res.ok) {
           if (res.status === 401) {
             localStorage.removeItem('user');
+            clearAllCartCaches();
+            setCartItems([]);
             openLoginModal();
             return null;
           }
@@ -247,7 +235,7 @@ export function CartProvider({ children }) {
             itemsArray = data.data;
           }
 
-          // Strictly filter by user_id on frontend as well
+          // Strictly keep only items belonging to this exact user.id
           const userItems = itemsArray.filter(
             item => !item.user_id || String(item.user_id) === String(user.id)
           );
@@ -298,11 +286,14 @@ export function CartProvider({ children }) {
         console.error(err);
       }
     } else {
-      const savedCart = localStorage.getItem('dharani_cart');
+      activeUserIdRef.current = null;
+      const savedCart = localStorage.getItem(GUEST_CART_KEY);
       const base = savedCart ? JSON.parse(savedCart) : [];
       const storedBundles = getStoredBundleCartItems();
       const bundleKeys = new Set(storedBundles.map(b => b.id));
-      const filtered = (base || []).filter(i => !bundleKeys.has(i.id));
+      const filtered = (base || []).filter(
+        i => !bundleKeys.has(i.id) && (!i.cartItemId || String(i.cartItemId).startsWith('guest-'))
+      );
       setCartItems([...filtered, ...storedBundles]);
     }
   };
@@ -312,16 +303,26 @@ export function CartProvider({ children }) {
     refreshCart();
   }, []);
 
-  // Sync cart cleanly on login and wipe old user storage on logout
+  // Wipe all cart caches immediately on login/logout transitions
   useEffect(() => {
     const handleAuthChange = () => {
       const currentUser = getUser();
       if (!currentUser) {
-        localStorage.removeItem('dharani_cart');
-        localStorage.removeItem('dharani_cart_offline_backup');
-        localStorage.removeItem(BUNDLE_CART_KEY);
+        // Logged out: wipe all cart keys & caches so nothing leaks to guest mode
+        activeUserIdRef.current = null;
+        clearAllCartCaches();
         setCartItems([]);
+        setShippingCost(null);
+        setTaxAmount(0);
+        setCgst(0);
+        setSgst(0);
+        setIgst(0);
+        setTaxTotal(0);
+        setGrandTotal(null);
       } else {
+        // Logged in: clear guest storage so guest items never reflect into logged-in account
+        clearAllCartCaches();
+        setCartItems([]);
         refreshCart();
       }
     };
@@ -329,17 +330,22 @@ export function CartProvider({ children }) {
     return () => window.removeEventListener('user-login-status-changed', handleAuthChange);
   }, []);
 
-  // Only persist guest items in dharani_cart (prevents logged-in items from leaking into guest cart)
+  // Keep guest storage and logged-in offline backup strictly separated
   useEffect(() => {
     try {
       const user = getUser();
       if (!user) {
+        localStorage.removeItem(OFFLINE_BACKUP_KEY);
         const guestOnly = cartItems.filter(
           i => !i.isBundle && (!i.cartItemId || String(i.cartItemId).startsWith('guest-'))
         );
-        localStorage.setItem('dharani_cart', JSON.stringify(guestOnly));
+        localStorage.setItem(GUEST_CART_KEY, JSON.stringify(guestOnly));
       } else {
-        localStorage.setItem('dharani_cart_offline_backup', JSON.stringify(cartItems));
+        localStorage.removeItem(GUEST_CART_KEY);
+        const userOnly = cartItems.filter(
+          i => !i.cartItemId || !String(i.cartItemId).startsWith('guest-')
+        );
+        localStorage.setItem(OFFLINE_BACKUP_KEY, JSON.stringify(userOnly));
       }
     } catch (e) {}
   }, [cartItems]);
@@ -519,7 +525,7 @@ export function CartProvider({ children }) {
 
     let formattedPrice = formatCurrency(itemPrice);
 
-    // ── GUEST USER: ADD TO LOCAL STATE WITHOUT REQUIRING LOGIN ──
+    // ── GUEST USER: ADD TO LOCAL STATE ONLY (NEVER SYNCED TO LOGIN ACCOUNT) ──
     if (!user) {
       if (existingItem) {
         if (String(existingItem.variation_id || '') === String(effectiveVariationId || '')) {
@@ -612,6 +618,7 @@ export function CartProvider({ children }) {
         }
         if (errData.message && errData.message.toLowerCase().includes('user')) {
           localStorage.removeItem('user');
+          clearAllCartCaches();
           if (typeof openLoginModal === 'function') openLoginModal();
           return;
         }
@@ -728,7 +735,7 @@ export function CartProvider({ children }) {
       const updated = prevItems.filter(item => item.id !== targetId && item.cartItemId !== productId);
       if (!user) {
         try {
-          localStorage.setItem('dharani_cart', JSON.stringify(updated.filter(i => !i.isBundle)));
+          localStorage.setItem(GUEST_CART_KEY, JSON.stringify(updated.filter(i => !i.isBundle)));
         } catch (e) {}
       }
       return updated;
@@ -782,7 +789,7 @@ export function CartProvider({ children }) {
       const updated = prevItems.map(i => (i.id === targetId || i.cartItemId === productId) ? { ...i, quantity: newQuantity } : i);
       if (!user) {
         try {
-          localStorage.setItem('dharani_cart', JSON.stringify(updated.filter(i => !i.isBundle)));
+          localStorage.setItem(GUEST_CART_KEY, JSON.stringify(updated.filter(i => !i.isBundle)));
         } catch (e) {}
       }
       return updated;
